@@ -8,11 +8,11 @@ class testTypeDict():
     def __init__(self):
         self.RECURSION_STR = 1
         self.RECURSION_STR_PTR = 2
-        self.RECURSION_MUTI_PTR = 3
+        self.RECURSION_MULTI_PTR = 3
 
         self.NO_RECUR_STR = 4
         self.NO_RECUR_STR_PTR = 5
-        self.NO_RECUR_MUTI_PTR = 6
+        self.NO_RECUR_MULTI_PTR = 6
 
         self.ERROR_TC = 11
         self.ERROR_FORMAT = 12
@@ -141,7 +141,21 @@ class DnsTesterClass(object):
             print('error in domainToHex:' + e.message)
             return None
 
-    def replaceWithPtr(self, oriHexStr, targetHexStr):
+    def changeCnameLen(self, dnsPkt, targetHexStr, ptrStr):
+        """
+        用于更新指针替换后的CNAME-rdata字段的长度问题，防止出现格式错误
+        :param dnsPkt: 指针替换后的DNS包
+        :param targetHexStr: 原域名字符串 eg 0a74657374707265666978037777770375313703636f6d00
+        :param ptrStr: eg '0a74657374707265666978c00c'
+        :return: 修改完成后的DNS包
+        """
+        result = binascii.hexlify(str(dnsPkt))
+        replaceTarget = ('0000' + str(hex(len(targetHexStr)/2))[2:])[-4:] + ptrStr
+        putInStr = ('0000' + str(hex(len(ptrStr)/2))[2:])[-4:] + ptrStr
+        return binascii.unhexlify(result.replace(replaceTarget, putInStr))
+
+
+    def replaceWithPtr(self, oriHexStr, targetHexStr, type='ONE'):
         """
         替换原始hexStr中的第二个targetHexStr为标签序列指针
         :param oriHexStr:
@@ -151,16 +165,29 @@ class DnsTesterClass(object):
         #todo: 增加部分替换，嵌套替换
         oriHexStr = binascii.hexlify(oriHexStr)
         oriSplit = oriHexStr.split(targetHexStr)
-        if len(oriSplit) >= 3:
-            editHexStr = oriSplit[0] + targetHexStr + oriSplit[1]
-            editHexStr += 'c0' + ('00' + hex(editHexStr.find(targetHexStr) / 2)[2:])[-2:]
-            editHexStr += oriSplit[2]
-            for i in range(3, len(oriSplit)):
-                editHexStr += targetHexStr
-                editHexStr += oriSplit[i]
-            return binascii.unhexlify(editHexStr)
-        else:
-            return binascii.unhexlify(oriHexStr)
+        if type=='ONE':
+            if len(oriSplit) >= 3:
+                editHexStr = oriSplit[0] + targetHexStr + oriSplit[1]
+                editHexStr += 'c0' + ('00' + hex(editHexStr.find(targetHexStr) / 2)[2:])[-2:]
+                editHexStr += oriSplit[2]
+                for i in range(3, len(oriSplit)):
+                    editHexStr += targetHexStr
+                    editHexStr += oriSplit[i]
+                return binascii.unhexlify(editHexStr)
+            else:
+                return binascii.unhexlify(oriHexStr)
+        elif type=='ALL':
+            if len(oriSplit) >= 3:
+                editHexStr = oriSplit[0] + targetHexStr + oriSplit[1]
+                editHexStr += 'c0' + ('00' + hex(editHexStr.find(targetHexStr) / 2)[2:])[-2:]
+                editHexStr += oriSplit[2]
+                for i in range(3, len(oriSplit)):
+                    editHexStr += 'c0' + ('00' + hex(editHexStr.find(targetHexStr) / 2)[2:])[-2:]
+                    editHexStr += oriSplit[i]
+                return binascii.unhexlify(editHexStr)
+            else:
+                return binascii.unhexlify(oriHexStr)
+
 
     def confirmAssert(self,
                       pktType = 'DNS',
@@ -270,7 +297,7 @@ class DnsTesterClass(object):
                           ))
             dnsRply = self.replaceWithPtr(oriHexStr=str(dnsRply), targetHexStr=self.domainToHex(pkt['DNS'].qd.qname))
 
-        elif testType == pktType.RECURSION_MUTI_PTR:
+        elif testType == pktType.RECURSION_MULTI_PTR:
             #todo 递归 嵌套指针
             dnsRply = DNS(qr=1,
                       id=pkt['DNS'].id,
@@ -291,9 +318,14 @@ class DnsTesterClass(object):
                                 ttl=45678,
                                 rdata=self.ipTarget)
                           ))
-            dnsRply = self.replaceWithPtr(oriHexStr=str(dnsRply), targetHexStr=self.domainToHex(pkt['DNS'].qd.qname))
-            dnsRply = self.replaceWithPtr(oriHexStr=str(dnsRply), targetHexStr=self.domainToHex(pkt['DNS'].qd.qname))
-            dnsRply = self.replaceWithPtr(oriHexStr=str(dnsRply), targetHexStr=self.domainToHex('testprefix')+'c00c')
+            #一次替换
+            dnsRply = self.replaceWithPtr(oriHexStr=str(dnsRply), targetHexStr=self.domainToHex(pkt['DNS'].qd.qname), type='ALL')
+            #更新CNAME的LEN
+            dnsRply = self.changeCnameLen(dnsRply,
+                                          targetHexStr=self.domainToHex('testprefix.' + pkt['DNS'].qd.qname),
+                                          ptrStr=self.domainToHex('testprefix')[:-2]+'c00c')
+            #二次替换
+            dnsRply = self.replaceWithPtr(oriHexStr=str(dnsRply), targetHexStr=self.domainToHex('testprefix')[:-2]+'c00c', type='ALL')
 
         elif testType == pktType.NO_RECUR_STR:
             #迭代回复 无指针
@@ -331,7 +363,7 @@ class DnsTesterClass(object):
                           ))
             dnsRply = self.replaceWithPtr(oriHexStr=str(dnsRply), targetHexStr=self.domainToHex(pkt['DNS'].qd.qname))
 
-        elif testType == pktType.NO_RECUR_MUTI_PTR:
+        elif testType == pktType.NO_RECUR_MULTI_PTR:
             #todo 迭代回复 嵌套指针
             dnsRply = DNS(qr=1,
                       id=pkt['DNS'].id,
@@ -352,9 +384,14 @@ class DnsTesterClass(object):
                                 ttl=45678,
                                 rdata=self.ipTarget)
                           ))
-            dnsRply = self.replaceWithPtr(oriHexStr=str(dnsRply), targetHexStr=self.domainToHex(pkt['DNS'].qd.qname))
-            dnsRply = self.replaceWithPtr(oriHexStr=str(dnsRply), targetHexStr=self.domainToHex(pkt['DNS'].qd.qname))
-            dnsRply = self.replaceWithPtr(oriHexStr=str(dnsRply), targetHexStr=self.domainToHex('testprefix')+'c00c')
+            #一次替换
+            dnsRply = self.replaceWithPtr(oriHexStr=str(dnsRply), targetHexStr=self.domainToHex(pkt['DNS'].qd.qname), type='ALL')
+            #更新CNAME的LEN
+            dnsRply = self.changeCnameLen(dnsRply,
+                                          targetHexStr=self.domainToHex('testprefix.' + pkt['DNS'].qd.qname),
+                                          ptrStr=self.domainToHex('testprefix')[:-2]+'c00c')
+            #二次替换
+            dnsRply = self.replaceWithPtr(oriHexStr=str(dnsRply), targetHexStr=self.domainToHex('testprefix')[:-2]+'c00c', type='ALL')
 
         elif testType == pktType.ERROR_TC:
             #截断 递归 有回答 无指针
@@ -458,12 +495,49 @@ class DnsTestManager(DnsTesterClass):
                                              clientIp = cliIp,
                                              iface=ifaceStr,
                                              timeOut=timeOutInt)
-
+    #测试正常格式
     def testRecursionStr(self):
-        self.monitorDnsQuery(senderIp= self.clientIp, domainTarget=self.domainName )
+        self.monitorDnsQuery(senderIp= self.clientIp, domainTarget=self.domainName)
         reply = self.createReply(dnsQuery=self.dnsQueryPkt, testType=pktType.RECURSION_STR)
         self.sendBySock(replyPkt=reply, queryPkt=self.dnsQueryPkt)
+        self.confirmAssert(pktType='TCP', ipSrc=self.dnsQueryPkt['IP'].src, ipDst=self.ipTarget)    
+        
+    def testRecursionStrPtr(self):
+        self.monitorDnsQuery(senderIp= self.clientIp, domainTarget=self.domainName)
+        reply = self.createReply(dnsQuery=self.dnsQueryPkt, testType=pktType.RECURSION_STR_PTR)
+        self.sendBySock(replyPkt=reply, queryPkt=self.dnsQueryPkt)
         self.confirmAssert(pktType='TCP', ipSrc=self.dnsQueryPkt['IP'].src, ipDst=self.ipTarget)
+        
+    def testRecursionMultiPtr(self):
+        self.monitorDnsQuery(senderIp= self.clientIp, domainTarget=self.domainName)
+        reply = self.createReply(dnsQuery=self.dnsQueryPkt, testType=pktType.RECURSION_MULTI_PTR)
+        self.sendBySock(replyPkt=reply, queryPkt=self.dnsQueryPkt)
+        self.confirmAssert(pktType='TCP', ipSrc=self.dnsQueryPkt['IP'].src, ipDst=self.ipTarget)
+
+    def testNoRecurStr(self):
+        self.monitorDnsQuery(senderIp= self.clientIp, domainTarget=self.domainName)
+        reply = self.createReply(dnsQuery=self.dnsQueryPkt, testType=pktType.NO_RECUR_STR)
+        self.sendBySock(replyPkt=reply, queryPkt=self.dnsQueryPkt)
+        self.confirmAssert(pktType='TCP', ipSrc=self.dnsQueryPkt['IP'].src, ipDst=self.ipTarget) 
+    
+    def testNoRecurStrPtr(self):
+        self.monitorDnsQuery(senderIp= self.clientIp, domainTarget=self.domainName)
+        reply = self.createReply(dnsQuery=self.dnsQueryPkt, testType=pktType.NO_RECUR_STR_PTR)
+        self.sendBySock(replyPkt=reply, queryPkt=self.dnsQueryPkt)
+        self.confirmAssert(pktType='TCP', ipSrc=self.dnsQueryPkt['IP'].src, ipDst=self.ipTarget) 
+        
+    def testNoRecurMultiPtr(self):
+        self.monitorDnsQuery(senderIp= self.clientIp, domainTarget=self.domainName)
+        reply = self.createReply(dnsQuery=self.dnsQueryPkt, testType=pktType.NO_RECUR_MULTI_PTR)
+        self.sendBySock(replyPkt=reply, queryPkt=self.dnsQueryPkt)
+        self.confirmAssert(pktType='TCP', ipSrc=self.dnsQueryPkt['IP'].src, ipDst=self.ipTarget) 
+
+    #测试错误格式
+    def testErrorTC(self):
+        self.monitorDnsQuery(senderIp= self.clientIp, domainTarget=self.domainName)
+        reply = self.createReply(dnsQuery=self.dnsQueryPkt, testType=pktType.ERROR_TC)
+        self.sendBySock(replyPkt=reply, queryPkt=self.dnsQueryPkt)
+        self.confirmAssert(pktType= 'TCP', ipSrc=self.clientIp, ipDst=self.dnsQueryPkt['IP'].dst)
 
     def testErrorFormat(self):
         self.monitorDnsQuery(senderIp= self.clientIp, domainTarget=self.domainName)
@@ -471,7 +545,41 @@ class DnsTestManager(DnsTesterClass):
         self.sendBySock(replyPkt=reply, queryPkt=self.dnsQueryPkt)
         self.confirmAssert(pktType= 'DNS', ipSrc=self.clientIp, ipDst=self.dnsQueryPkt['IP'].dst, tarDomain=self.dnsQueryPkt['DNS'].qd.qname)
 
+    def testErrorServerFailure(self):
+        self.monitorDnsQuery(senderIp= self.clientIp, domainTarget=self.domainName)
+        reply = self.createReply(dnsQuery=self.dnsQueryPkt, testType=pktType.ERROR_SERVER_FAILURE)
+        self.sendBySock(replyPkt=reply, queryPkt=self.dnsQueryPkt)
+        self.confirmAssert(pktType= 'DNS', ipSrc=self.clientIp, ipDst=self.dnsQueryPkt['IP'].dst, tarDomain=self.dnsQueryPkt['DNS'].qd.qname)
+
+    def testErrorWrongName(self):
+        #todo 正常为DNS请求， 重发请求也行？
+        self.monitorDnsQuery(senderIp= self.clientIp, domainTarget=self.domainName)
+        reply = self.createReply(dnsQuery=self.dnsQueryPkt, testType=pktType.ERROR_WRONG_NAME)
+        self.sendBySock(replyPkt=reply, queryPkt=self.dnsQueryPkt)
+        self.confirmAssert(pktType= 'DNS', ipSrc=self.clientIp, ipDst=self.dnsQueryPkt['IP'].dst, tarDomain=self.dnsQueryPkt['DNS'].qd.qname)
+
+    def testErrorUnsupport(self):
+        self.monitorDnsQuery(senderIp= self.clientIp, domainTarget=self.domainName)
+        reply = self.createReply(dnsQuery=self.dnsQueryPkt, testType=pktType.ERROR_UNSUPPORT)
+        self.sendBySock(replyPkt=reply, queryPkt=self.dnsQueryPkt)
+        self.confirmAssert(pktType= 'DNS', ipSrc=self.clientIp, ipDst=self.dnsQueryPkt['IP'].dst, tarDomain=self.dnsQueryPkt['DNS'].qd.qname)
+
+    def testErrorRefused(self):
+        self.monitorDnsQuery(senderIp= self.clientIp, domainTarget=self.domainName)
+        reply = self.createReply(dnsQuery=self.dnsQueryPkt, testType=pktType.ERROR_REFUSED)
+        self.sendBySock(replyPkt=reply, queryPkt=self.dnsQueryPkt)
+        self.confirmAssert(pktType= 'DNS', ipSrc=self.clientIp, ipDst=self.dnsQueryPkt['IP'].dst, tarDomain=self.dnsQueryPkt['DNS'].qd.qname)
+
+    def testErrorReserved(self):
+        self.monitorDnsQuery(senderIp= self.clientIp, domainTarget=self.domainName)
+        reply = self.createReply(dnsQuery=self.dnsQueryPkt, testType=pktType.ERROR_RESERVED)
+        self.sendBySock(replyPkt=reply, queryPkt=self.dnsQueryPkt)
+        self.confirmAssert(pktType= 'DNS', ipSrc=self.clientIp, ipDst=self.dnsQueryPkt['IP'].dst, tarDomain=self.dnsQueryPkt['DNS'].qd.qname)
+
 if __name__ == '__main__':
     dnsTester = DnsTestManager(ipTargetStr='172.31.81.137', cliIp='172.31.81.222', domainStr='www.u17.com', timeOutInt=50)
-    dnsTester.testErrorFormat()
-    dnsTester.testRecursionStr()
+    # dnsTester.testErrorFormat()
+    # dnsTester.testRecursionStr()
+    print(dnsTester.domainToHex('testprefix'))
+    print(dnsTester.domainToHex('testprefix.www.u17.com'))
+    print(dnsTester.domainToHex('testprefix')[:-2]+'c00c')
